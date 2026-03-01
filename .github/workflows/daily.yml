@@ -2,7 +2,7 @@ name: 창업공고 매일 자동 알림
 
 on:
   schedule:
-    - cron: '0 6 * * *'
+    - cron: '0 6 * * *'   # 매일 오후 3시 (한국시간)
   workflow_dispatch:
 
 jobs:
@@ -26,13 +26,14 @@ jobs:
           python-version: '3.11'
 
       - name: 라이브러리 설치
-        run: pip install requests beautifulsoup4
+        run: pip install requests beautifulsoup4 anthropic
 
       - name: 크롤러 실행
         env:
-          GMAIL_USER:   ${{ secrets.GMAIL_USER }}
-          GMAIL_PASS:   ${{ secrets.GMAIL_PASS }}
-          NOTIFY_EMAIL: ${{ secrets.NOTIFY_EMAIL }}
+          GMAIL_USER:        ${{ secrets.GMAIL_USER }}
+          GMAIL_PASS:        ${{ secrets.GMAIL_PASS }}
+          NOTIFY_EMAIL:      ${{ secrets.NOTIFY_EMAIL }}
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
         run: python crawler.py
 
       - name: seen_ids.json 저장
