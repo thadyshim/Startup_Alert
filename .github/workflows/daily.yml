@@ -1,4 +1,4 @@
-yamlname: 창업공고 매일 자동 알림
+name: 창업공고 매일 자동 알림
 
 on:
   schedule:
