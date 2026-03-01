@@ -1,0 +1,43 @@
+yamlname: 창업공고 매일 자동 알림
+
+on:
+  schedule:
+    - cron: '0 0 * * *'
+  workflow_dispatch:
+
+jobs:
+  crawl-and-notify:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: 코드 내려받기
+        uses: actions/checkout@v4
+
+      - name: seen_ids.json 캐시 복원
+        uses: actions/cache@v4
+        with:
+          path: seen_ids.json
+          key: seen-ids-${{ hashFiles('seen_ids.json') }}
+          restore-keys: seen-ids-
+
+      - name: Python 설치
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: 라이브러리 설치
+        run: pip install requests beautifulsoup4
+
+      - name: 크롤러 실행
+        env:
+          GMAIL_USER:   ${{ secrets.GMAIL_USER }}
+          GMAIL_PASS:   ${{ secrets.GMAIL_PASS }}
+          NOTIFY_EMAIL: ${{ secrets.NOTIFY_EMAIL }}
+        run: python crawler.py
+
+      - name: seen_ids.json 저장
+        uses: actions/cache/save@v4
+        if: always()
+        with:
+          path: seen_ids.json
+          key: seen-ids-${{ github.run_id }}
