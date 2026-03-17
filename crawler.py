@@ -1,94 +1,55 @@
 import requests
-from bs4 import BeautifulSoup
 import smtplib
 import os
 from email.mime.text import MIMEText
+from xml.etree import ElementTree as ET
 from datetime import datetime
 
-print("===== Startup Radar =====")
+print("===== Startup Radar RSS =====")
 print("Start:", datetime.now())
 
 items = []
 
-# ------------------------
-# KSTARTUP 크롤링
-# ------------------------
+def crawl_rss(url, source):
 
-def crawl_kstartup():
+    try:
+        r = requests.get(url, timeout=20)
+        root = ET.fromstring(r.content)
 
-    url = "https://www.k-startup.go.kr/web/contents/bizpbanc-ongoing.do"
+        for item in root.iter("item"):
 
-    r = requests.get(url,timeout=20)
+            title = item.find("title").text
+            link = item.find("link").text
 
-    soup = BeautifulSoup(r.text,"html.parser")
+            items.append({
+                "title": title,
+                "link": link,
+                "source": source
+            })
 
-    rows = soup.select("table tbody tr")
-
-    print("KStartup rows:",len(rows))
-
-    for row in rows:
-
-        cols = row.find_all("td")
-
-        if len(cols) < 2:
-            continue
-
-        title = cols[1].get_text(strip=True)
-
-        link = "https://www.k-startup.go.kr"
-
-        items.append({
-            "title":title,
-            "link":link,
-            "source":"KStartup"
-        })
+    except Exception as e:
+        print(source, "error:", e)
 
 
-# ------------------------
-# BIZINFO 크롤링
-# ------------------------
+# RSS sources
+crawl_rss(
+    "https://www.bizinfo.go.kr/rss",
+    "Bizinfo"
+)
 
-def crawl_bizinfo():
+crawl_rss(
+    "https://www.k-startup.go.kr/rss",
+    "KStartup"
+)
 
-    url="https://www.bizinfo.go.kr/web/lay1/bbs/S1T122C128/AS/74/list.do"
-
-    r=requests.get(url,timeout=20)
-
-    soup=BeautifulSoup(r.text,"html.parser")
-
-    rows=soup.select("table tbody tr")
-
-    print("Bizinfo rows:",len(rows))
-
-    for row in rows:
-
-        cols=row.find_all("td")
-
-        if len(cols)<2:
-            continue
-
-        title=cols[1].get_text(strip=True)
-
-        link="https://www.bizinfo.go.kr"
-
-        items.append({
-            "title":title,
-            "link":link,
-            "source":"Bizinfo"
-        })
-
-
-crawl_kstartup()
-crawl_bizinfo()
-
-print("Total collected:",len(items))
+print("Collected:", len(items))
 
 
 # ------------------------
 # 점수 필터
 # ------------------------
 
-KEYWORDS={
+KEYWORDS = {
 "창업":5,
 "스타트업":5,
 "예비창업":6,
@@ -105,72 +66,51 @@ KEYWORDS={
 
 def score(title):
 
-    s=0
-
+    s = 0
     for k,v in KEYWORDS.items():
-
         if k in title:
-
-            s+=v
+            s += v
 
     return s
 
 
-scored=[]
+scored = []
 
 for i in items:
 
-    s=score(i["title"])
+    s = score(i["title"])
 
-    if s>0:
-
-        i["score"]=s
-
+    if s > 0:
+        i["score"] = s
         scored.append(i)
 
-print("After scoring:",len(scored))
+
+print("After scoring:", len(scored))
 
 
-# ------------------------
 # 중복 제거
-# ------------------------
-
-unique={}
-
-for i in scored:
-
-    unique[i["title"]]=i
-
-results=list(unique.values())
+unique = {i["title"]: i for i in scored}
+results = list(unique.values())
 
 
-# ------------------------
 # 점수 정렬
-# ------------------------
-
-results=sorted(results,key=lambda x:x["score"],reverse=True)
+results = sorted(results, key=lambda x: x["score"], reverse=True)
 
 
-# ------------------------
 # 최대 10개
-# ------------------------
+results = results[:10]
 
-results=results[:10]
-
-print("Final results:",len(results))
+print("Final results:", len(results))
 
 
-# ------------------------
 # 메일 내용
-# ------------------------
+if len(results) == 0:
 
-if len(results)==0:
-
-    content="오늘 감지된 창업 공고 없음"
+    content = "오늘 감지된 창업 공고 없음"
 
 else:
 
-    lines=[]
+    lines = []
 
     for r in results:
 
@@ -178,27 +118,24 @@ else:
             f"[{r['source']}] {r['title']}\n{r['link']}\n"
         )
 
-    content="\n".join(lines)
+    content = "\n".join(lines)
 
 
-# ------------------------
 # 이메일 발송
-# ------------------------
 
-GMAIL_USER=os.environ.get("GMAIL_USER")
-GMAIL_PASS=os.environ.get("GMAIL_PASS")
-NOTIFY_EMAIL=os.environ.get("NOTIFY_EMAIL")
+GMAIL_USER = os.environ.get("GMAIL_USER")
+GMAIL_PASS = os.environ.get("GMAIL_PASS")
+NOTIFY_EMAIL = os.environ.get("NOTIFY_EMAIL")
 
-msg=MIMEText(content)
+msg = MIMEText(content)
 
-msg["Subject"]="Startup Radar"
-
-msg["From"]=GMAIL_USER
-msg["To"]=NOTIFY_EMAIL
+msg["Subject"] = "Startup Radar"
+msg["From"] = GMAIL_USER
+msg["To"] = NOTIFY_EMAIL
 
 try:
 
-    server=smtplib.SMTP_SSL("smtp.gmail.com",465)
+    server = smtplib.SMTP_SSL("smtp.gmail.com",465)
 
     server.login(GMAIL_USER,GMAIL_PASS)
 
