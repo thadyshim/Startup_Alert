@@ -11,21 +11,31 @@ print("Start:", datetime.now())
 KEYWORDS = [
     "창업",
     "스타트업",
-    "AI",
-    "데이터",
-    "헬스케어",
+    "예비창업",
+    "초기창업",
+    "창업기업",
+    "창업지원"
+]
+
+HIGH_VALUE = [
+    "패키지",
+    "액셀러레이팅",
+    "TIPS",
     "소셜벤처",
+    "기술창업",
     "중장년"
 ]
 
 items = []
 
+
 def crawl_kstartup():
-    print("Crawling KStartup...")
+    print("Crawling KStartup")
+
     url = "https://www.k-startup.go.kr/web/contents/bizpbanc-ongoing.do"
     r = requests.get(url, timeout=20)
-    soup = BeautifulSoup(r.text, "html.parser")
 
+    soup = BeautifulSoup(r.text, "html.parser")
     rows = soup.select("table tbody tr")
 
     print("KStartup rows:", len(rows))
@@ -36,21 +46,21 @@ def crawl_kstartup():
             continue
 
         title = cols[1].get_text(strip=True)
-        link = "https://www.k-startup.go.kr"
 
         items.append({
             "title": title,
-            "link": link,
+            "link": "https://www.k-startup.go.kr",
             "source": "KStartup"
         })
 
 
 def crawl_bizinfo():
-    print("Crawling Bizinfo...")
+    print("Crawling Bizinfo")
+
     url = "https://www.bizinfo.go.kr/web/lay1/bbs/S1T122C128/AS/74/list.do"
     r = requests.get(url, timeout=20)
-    soup = BeautifulSoup(r.text, "html.parser")
 
+    soup = BeautifulSoup(r.text, "html.parser")
     rows = soup.select("table tbody tr")
 
     print("Bizinfo rows:", len(rows))
@@ -74,7 +84,8 @@ crawl_bizinfo()
 
 print("Total collected:", len(items))
 
-# 키워드 필터
+
+# 1️⃣ 창업 관련 필터
 filtered = []
 
 for i in items:
@@ -85,26 +96,42 @@ for i in items:
 
 print("After keyword filter:", len(filtered))
 
-# 중복 제거
-unique = {}
-for i in filtered:
-    unique[i["title"]] = i
 
+# 2️⃣ 중복 제거
+unique = {i["title"]: i for i in filtered}
 results = list(unique.values())
 
 print("After duplicate removal:", len(results))
+
+
+# 3️⃣ 중요사업 우선순위
+def score(item):
+    title = item["title"]
+    return sum(k in title for k in HIGH_VALUE)
+
+results = sorted(results, key=score, reverse=True)
+
+
+# 4️⃣ 최대 10개만
+results = results[:10]
+
+print("Final results:", len(results))
+
 
 # 메일 내용 생성
 if len(results) == 0:
     content = "오늘 감지된 창업 관련 공고가 없습니다."
 else:
+
     lines = []
-    for r in results[:20]:
-        lines.append(f"[{r['source']}] {r['title']}\n{r['link']}\n")
+    for r in results:
+
+        lines.append(
+            f"[{r['source']}] {r['title']}\n{r['link']}\n"
+        )
 
     content = "\n".join(lines)
 
-print("Preparing email...")
 
 # 이메일 발송
 GMAIL_USER = os.environ.get("GMAIL_USER")
@@ -121,8 +148,10 @@ try:
     server.login(GMAIL_USER, GMAIL_PASS)
     server.sendmail(GMAIL_USER, NOTIFY_EMAIL, msg.as_string())
     server.quit()
-    print("Email sent successfully")
+
+    print("Email sent")
+
 except Exception as e:
-    print("Email send error:", e)
+    print("Email error:", e)
 
 print("===== Done =====")
