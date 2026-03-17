@@ -6,26 +6,30 @@ from email.mime.multipart import MIMEMultipart
 import os
 import json
 import hashlib
+import re
 from datetime import datetime
 import anthropic
 
-GMAIL_USER    = os.environ["GMAIL_USER"]
-GMAIL_PASS    = os.environ["GMAIL_PASS"]
-NOTIFY_EMAIL  = os.environ["NOTIFY_EMAIL"]
+GMAIL_USER = os.environ["GMAIL_USER"]
+GMAIL_PASS = os.environ["GMAIL_PASS"]
+NOTIFY_EMAIL = os.environ["NOTIFY_EMAIL"]
 ANTHROPIC_KEY = os.environ["ANTHROPIC_API_KEY"]
 
 SEEN_FILE = "seen_ids.json"
 
-# ── MindBridge 프로젝트 소개 (AI 판단 기준) ────────────────
+# MindBridge 프로젝트 기준
 MINDBRIDGE_PROFILE = """
-프로젝트명: MindBridge
-분야: 인지훈련, 디지털 헬스케어, 노인/치매 예방, AI 기반 뇌건강 플랫폼
-기술: 웹 기반 서비스, AI, 소프트웨어 개발
-팀 구성: 공동창업자 3명 (개발자 포함), 무자본 창업 초기 단계
-목표: 예비창업패키지, 초기창업패키지, 창업도약패키지, 소셜벤처 지원사업 확보
+MindBridge는 AI 기반 인지훈련 / 디지털 헬스케어 서비스입니다.
+노인 치매 예방과 인지 훈련을 위한 소프트웨어 플랫폼입니다.
+
+적합 사업
+- 예비창업패키지
+- 초기창업패키지
+- 창업도약패키지
+- 소셜벤처
+- AI / 디지털헬스 / ICT
 """
 
-# ── 고액 창업사업 필터 (5000만원 이상 가능 사업) ───────────
 HIGH_VALUE_PROGRAMS = [
     "예비창업패키지",
     "초기창업패키지",
@@ -36,24 +40,24 @@ HIGH_VALUE_PROGRAMS = [
     "신사업창업사관학교"
 ]
 
-# ── 일반 키워드 필터 ─────────────────────────────────────
+FUNDING_KEYWORDS = {
+    "5천": 50000000,
+    "5000": 50000000,
+    "1억": 100000000,
+    "2억": 200000000,
+    "3억": 300000000
+}
+
 INCLUDE_KEYWORDS = [
-    "예비창업", "초기창업", "창업도약",
-    "창업지원", "창업패키지",
-    "AI", "인공지능", "ICT", "디지털",
-    "헬스케어", "디지털헬스",
-    "복지", "노인", "치매",
-    "소셜벤처", "사회적기업",
-    "스타트업", "벤처",
+    "창업", "스타트업", "벤처", "AI", "ICT",
+    "디지털", "헬스케어", "소셜벤처",
     "R&D", "기술개발"
 ]
 
 EXCLUDE_KEYWORDS = [
-    "제조", "식품", "농업",
-    "수출", "해외진출",
-    "대기업", "중견기업",
-    "프랜차이즈"
+    "농업", "식품", "수출", "프랜차이즈"
 ]
+
 
 def load_seen():
     if os.path.exists(SEEN_FILE):
@@ -61,14 +65,16 @@ def load_seen():
             return set(json.load(f))
     return set()
 
+
 def save_seen(seen):
     with open(SEEN_FILE, "w") as f:
         json.dump(list(seen), f)
 
+
 def make_id(title, url):
     return hashlib.md5((title + url).encode()).hexdigest()
 
-# ── 1차 키워드 필터 ───────────────────────────────────────
+
 def keyword_filter(title):
 
     for kw in EXCLUDE_KEYWORDS:
@@ -81,7 +87,7 @@ def keyword_filter(title):
 
     return False
 
-# ── 고액 사업 필터 ───────────────────────────────────────
+
 def high_value_filter(title):
 
     for kw in HIGH_VALUE_PROGRAMS:
@@ -90,7 +96,41 @@ def high_value_filter(title):
 
     return False
 
-# ── Claude AI 필터 ──────────────────────────────────────
+
+def estimate_funding(title):
+
+    for key, value in FUNDING_KEYWORDS.items():
+        if key in title:
+            return value
+
+    return 0
+
+
+def detect_deadline(title):
+
+    match = re.search(r'(\d{1,2})월\s*(\d{1,2})일', title)
+
+    if not match:
+        return None
+
+    month = int(match.group(1))
+    day = int(match.group(2))
+
+    year = datetime.now().year
+
+    deadline = datetime(year, month, day)
+
+    delta = (deadline - datetime.now()).days
+
+    if delta <= 3:
+        return "D-3"
+
+    if delta <= 7:
+        return "D-7"
+
+    return None
+
+
 def ai_filter(items):
 
     if not items:
@@ -98,58 +138,49 @@ def ai_filter(items):
 
     client = anthropic.Anthropic(api_key=ANTHROPIC_KEY)
 
-    titles_text = "\n".join(
-        [f"{i+1}. [{item['source']}] {item['title']}" for i, item in enumerate(items)]
+    titles = "\n".join(
+        [f"{i+1}. {item['title']}" for i, item in enumerate(items)]
     )
 
     prompt = f"""
-다음은 창업 지원 공고 목록입니다.
+다음 창업 공고 중 MindBridge 프로젝트에 적합한 번호만 선택하세요.
 
 {MINDBRIDGE_PROFILE}
 
-공고 목록:
-{titles_text}
+공고 목록
+{titles}
 
-MindBridge 프로젝트에 적합한 공고 번호만 선택하세요.
+응답 예시
+1,3
 
-응답 형식
-1,3,5
-
-적합한 공고가 없으면
+없으면
 없음
 """
 
     try:
 
         message = client.messages.create(
-            model="claude-opus-4-6",
+            model="claude-3-5-sonnet-20240620",
             max_tokens=200,
             messages=[{"role": "user", "content": prompt}]
         )
 
         response = message.content[0].text.strip()
 
-        print("AI 판단:", response)
-
         if response == "없음":
             return []
 
-        selected = [
-            int(x.strip()) - 1
-            for x in response.split(",")
-            if x.strip().isdigit()
-        ]
+        idx = [int(x.strip())-1 for x in response.split(",") if x.strip().isdigit()]
 
-        return [items[i] for i in selected if 0 <= i < len(items)]
+        return [items[i] for i in idx if i < len(items)]
 
     except Exception as e:
 
-        print("AI 필터 오류:", e)
+        print("AI 오류", e)
 
         return items
 
 
-# ── 크롤링 함수 ─────────────────────────────────────────
 def crawl_kstartup():
 
     results = []
@@ -178,12 +209,12 @@ def crawl_kstartup():
                     results.append({
                         "title": title,
                         "url": href,
-                        "source": "창업넷"
+                        "source": "K-Startup"
                     })
 
     except Exception as e:
 
-        print("창업넷 오류:", e)
+        print("kstartup error", e)
 
     return results
 
@@ -200,28 +231,24 @@ def crawl_mss():
 
         soup = BeautifulSoup(r.text, "html.parser")
 
-        for a in soup.select("td.subject a, td a"):
+        for a in soup.select("td.subject a"):
 
             title = a.get_text(strip=True)
 
             href = a.get("href", "")
 
-            if len(title) > 10:
+            if href.startswith("/"):
+                href = "https://www.mss.go.kr" + href
 
-                if href.startswith("/"):
-                    href = "https://www.mss.go.kr" + href
-
-                if href.startswith("http"):
-
-                    results.append({
-                        "title": title,
-                        "url": href,
-                        "source": "중소벤처기업부"
-                    })
+            results.append({
+                "title": title,
+                "url": href,
+                "source": "중소벤처기업부"
+            })
 
     except Exception as e:
 
-        print("중기부 오류:", e)
+        print("mss error", e)
 
     return results
 
@@ -238,63 +265,51 @@ def crawl_bizinfo():
 
         soup = BeautifulSoup(r.text, "html.parser")
 
-        for a in soup.select("td.tit a, .tit a"):
+        for a in soup.select("td.tit a"):
 
             title = a.get_text(strip=True)
 
             href = a.get("href", "")
 
-            if len(title) > 10:
+            if href.startswith("/"):
+                href = "https://www.bizinfo.go.kr" + href
 
-                if href.startswith("/"):
-                    href = "https://www.bizinfo.go.kr" + href
-
-                if href.startswith("http"):
-
-                    results.append({
-                        "title": title,
-                        "url": href,
-                        "source": "기업마당"
-                    })
+            results.append({
+                "title": title,
+                "url": href,
+                "source": "기업마당"
+            })
 
     except Exception as e:
 
-        print("기업마당 오류:", e)
+        print("bizinfo error", e)
 
     return results
 
 
-# ── 이메일 ─────────────────────────────────────────────
 def send_email(new_items, filtered_items):
 
     if not new_items:
-        print("새 공고 없음")
         return
 
-    subject = f"[MindBridge 창업공고] 추천 {len(filtered_items)}건 / 전체 {len(new_items)}건"
+    subject = f"[MindBridge 창업공고] 추천 {len(filtered_items)}건"
 
-    body = ""
+    body = "추천 공고\n"
+    body += "="*40 + "\n\n"
 
-    if filtered_items:
+    for item in filtered_items:
 
-        body += "🎯 추천 공고\n"
-        body += "=" * 40 + "\n\n"
-
-        for item in filtered_items:
-
-            body += f"[{item['source']}] {item['title']}\n"
-            body += f"{item['url']}\n\n"
-
-    else:
-
-        body += "추천 공고 없음\n\n"
-
-    body += "\n전체 새 공고\n"
-    body += "-" * 40 + "\n"
-
-    for item in new_items:
+        funding = estimate_funding(item["title"])
+        deadline = detect_deadline(item["title"])
 
         body += f"[{item['source']}] {item['title']}\n"
+
+        if funding > 0:
+            body += f"지원금 추정: {funding:,}원\n"
+
+        if deadline:
+            body += f"마감 임박: {deadline}\n"
+
         body += f"{item['url']}\n\n"
 
     msg = MIMEMultipart()
@@ -311,13 +326,8 @@ def send_email(new_items, filtered_items):
 
         server.send_message(msg)
 
-    print("이메일 발송 완료")
 
-
-# ── 메인 ───────────────────────────────────────────────
 def main():
-
-    print("크롤링 시작:", datetime.now())
 
     seen = load_seen()
 
@@ -326,8 +336,6 @@ def main():
     all_items += crawl_kstartup()
     all_items += crawl_mss()
     all_items += crawl_bizinfo()
-
-    print("총 수집:", len(all_items))
 
     new_items = []
 
@@ -341,21 +349,13 @@ def main():
 
             seen.add(uid)
 
-    print("새 공고:", len(new_items))
+    kw = [i for i in new_items if keyword_filter(i["title"])]
 
-    # 1차 키워드 필터
-    kw_filtered = [i for i in new_items if keyword_filter(i["title"])]
-    print("키워드 필터:", len(kw_filtered))
+    hv = [i for i in kw if high_value_filter(i["title"])]
 
-    # 2차 고액사업 필터
-    high_value = [i for i in kw_filtered if high_value_filter(i["title"])]
-    print("고액 사업:", len(high_value))
+    ai = ai_filter(hv)
 
-    # 3차 AI 필터
-    ai_filtered = ai_filter(high_value)
-    print("AI 추천:", len(ai_filtered))
-
-    send_email(new_items, ai_filtered)
+    send_email(new_items, ai)
 
     save_seen(seen)
 
