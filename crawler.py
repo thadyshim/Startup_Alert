@@ -1,154 +1,129 @@
 import requests
-import smtplib
+from bs4 import BeautifulSoup
+import datetime
+import json
 import os
+import smtplib
 from email.mime.text import MIMEText
 
-print("Startup Radar API mode")
-
-items = []
-
-
-# ------------------------
-# Bizinfo API
-# ------------------------
-
-try:
-
-    url = "https://www.bizinfo.go.kr/uss/rss/bizinfoApi.do?crtfcKey=sample&dataType=json&pageNo=1&numOfRows=50"
-
-    r = requests.get(url, timeout=20)
-
-    data = r.json()
-
-    for row in data["jsonArray"]:
-
-        title = row["pblancNm"]
-        link = "https://www.bizinfo.go.kr"
-
-        items.append({
-            "title": title,
-            "link": link,
-            "source": "Bizinfo"
-        })
-
-except Exception as e:
-
-    print("Bizinfo API error:", e)
-
-
-
-# ------------------------
-# KStartup API
-# ------------------------
-
-try:
-
-    url = "https://apis.data.go.kr/B552735/kstartupService/getAnnouncementList?serviceKey=sample&pageNo=1&numOfRows=50"
-
-    r = requests.get(url, timeout=20)
-
-    data = r.json()
-
-    rows = data["response"]["body"]["items"]["item"]
-
-    for row in rows:
-
-        title = row["title"]
-        link = row["detailUrl"]
-
-        items.append({
-            "title": title,
-            "link": link,
-            "source": "KStartup"
-        })
-
-except Exception as e:
-
-    print("KStartup API error:", e)
-
-
-
-print("Collected:", len(items))
-
-
-# ------------------------
-# 키워드 필터
-# ------------------------
-
 KEYWORDS = [
-"창업",
-"스타트업",
-"예비창업",
-"초기창업",
-"창업기업",
-"패키지",
-"TIPS",
-"중장년"
+"창업","스타트업","예비창업",
+"창업지원","사업화","창업패키지"
 ]
 
+URLS = {
+"KSTARTUP":"https://www.k-startup.go.kr/web/contents/bizpbanc-ongoing.do",
+"BIZINFO":"https://www.bizinfo.go.kr/web/lay1/bbs/S1T122C128/AS/74/list.do"
+}
 
-results = []
-
-for item in items:
-
-    for k in KEYWORDS:
-
-        if k in item["title"]:
-
-            results.append(item)
-            break
+SEEN_FILE="seen.json"
 
 
-print("Filtered:", len(results))
+def load_seen():
+    if os.path.exists(SEEN_FILE):
+        return set(json.load(open(SEEN_FILE)))
+    return set()
 
 
-# 중복 제거
-unique = {i["title"]: i for i in results}
-
-results = list(unique.values())
-
-# 최대 10개
-results = results[:10]
+def save_seen(data):
+    json.dump(list(data),open(SEEN_FILE,"w"))
 
 
-if len(results) == 0:
+def crawl():
 
-    content = "오늘 감지된 창업 공고 없음"
+    results=[]
 
-else:
+    for name,url in URLS.items():
 
-    lines = []
+        res=requests.get(url,timeout=20)
+        soup=BeautifulSoup(res.text,"html.parser")
 
-    for r in results:
+        for a in soup.select("a"):
 
-        lines.append(
-            f"[{r['source']}] {r['title']}\n{r['link']}\n"
-        )
+            title=a.get_text(strip=True)
 
-    content = "\n".join(lines)
+            if len(title)<10:
+                continue
+
+            if any(k in title for k in KEYWORDS):
+
+                link=a.get("href")
+
+                if link and not link.startswith("http"):
+                    link=url+link
+
+                results.append({
+                    "title":title,
+                    "link":link,
+                    "source":name
+                })
+
+    return results
 
 
+def filter_new(items):
 
-# ------------------------
-# 메일 발송
-# ------------------------
+    seen=load_seen()
+    new=[]
 
-GMAIL_USER = os.environ["GMAIL_USER"]
-GMAIL_PASS = os.environ["GMAIL_PASS"]
-NOTIFY_EMAIL = os.environ["NOTIFY_EMAIL"]
+    for i in items:
 
-msg = MIMEText(content)
+        uid=i["title"]
 
-msg["Subject"] = "Startup Radar"
-msg["From"] = GMAIL_USER
-msg["To"] = NOTIFY_EMAIL
+        if uid not in seen:
 
-server = smtplib.SMTP_SSL("smtp.gmail.com",465)
+            new.append(i)
+            seen.add(uid)
 
-server.login(GMAIL_USER,GMAIL_PASS)
+    save_seen(seen)
 
-server.sendmail(GMAIL_USER,NOTIFY_EMAIL,msg.as_string())
+    return new
 
-server.quit()
 
-print("Email sent")
+def send_email(items):
+
+    body=""
+
+    for i in items:
+
+        body+=f"""
+{i['title']}
+출처:{i['source']}
+{i['link']}
+
+"""
+
+    msg=MIMEText(body)
+
+    msg["Subject"]=f"창업 공고 {len(items)}건"
+    msg["From"]=os.environ["GMAIL"]
+    msg["To"]=os.environ["GMAIL"]
+
+    s=smtplib.SMTP_SSL("smtp.gmail.com",465)
+
+    s.login(
+        os.environ["GMAIL"],
+        os.environ["APP_PASSWORD"]
+    )
+
+    s.send_message(msg)
+    s.quit()
+
+
+def main():
+
+    items=crawl()
+    items=filter_new(items)
+
+    if not items:
+        items=[{
+            "title":"오늘 감지된 창업 공고 없음",
+            "link":"",
+            "source":"system"
+        }]
+
+    send_email(items)
+
+
+if __name__=="__main__":
+    main()
