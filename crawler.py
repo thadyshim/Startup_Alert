@@ -1,38 +1,29 @@
 import requests
-from bs4 import BeautifulSoup
 import smtplib
 import os
 from email.mime.text import MIMEText
 
-print("Start crawling")
+print("Startup Radar API mode")
 
 items = []
 
 
-# -------------------
-# Bizinfo (기업마당)
-# -------------------
+# ------------------------
+# Bizinfo API
+# ------------------------
 
 try:
 
-    url = "https://www.bizinfo.go.kr/web/lay1/bbs/S1T122C128/AS/74/list.do"
+    url = "https://www.bizinfo.go.kr/uss/rss/bizinfoApi.do?crtfcKey=sample&dataType=json&pageNo=1&numOfRows=50"
 
     r = requests.get(url, timeout=20)
-    soup = BeautifulSoup(r.text, "html.parser")
 
-    rows = soup.select("table tbody tr")
+    data = r.json()
 
-    print("Bizinfo rows:", len(rows))
+    for row in data["jsonArray"]:
 
-    for row in rows[:30]:
-
-        title_tag = row.select_one("td a")
-
-        if not title_tag:
-            continue
-
-        title = title_tag.text.strip()
-        link = "https://www.bizinfo.go.kr" + title_tag["href"]
+        title = row["pblancNm"]
+        link = "https://www.bizinfo.go.kr"
 
         items.append({
             "title": title,
@@ -42,35 +33,28 @@ try:
 
 except Exception as e:
 
-    print("Bizinfo error:", e)
+    print("Bizinfo API error:", e)
 
 
 
-# -------------------
-# K-Startup
-# -------------------
+# ------------------------
+# KStartup API
+# ------------------------
 
 try:
 
-    url = "https://www.k-startup.go.kr/web/contents/bizpbanc-ongoing.do"
+    url = "https://apis.data.go.kr/B552735/kstartupService/getAnnouncementList?serviceKey=sample&pageNo=1&numOfRows=50"
 
     r = requests.get(url, timeout=20)
 
-    soup = BeautifulSoup(r.text, "html.parser")
+    data = r.json()
 
-    rows = soup.select("div.list-item")
+    rows = data["response"]["body"]["items"]["item"]
 
-    print("KStartup rows:", len(rows))
+    for row in rows:
 
-    for row in rows[:30]:
-
-        title_tag = row.select_one("a")
-
-        if not title_tag:
-            continue
-
-        title = title_tag.text.strip()
-        link = "https://www.k-startup.go.kr" + title_tag["href"]
+        title = row["title"]
+        link = row["detailUrl"]
 
         items.append({
             "title": title,
@@ -80,16 +64,16 @@ try:
 
 except Exception as e:
 
-    print("KStartup error:", e)
+    print("KStartup API error:", e)
 
 
 
-print("Total collected:", len(items))
+print("Collected:", len(items))
 
 
-# -------------------
+# ------------------------
 # 키워드 필터
-# -------------------
+# ------------------------
 
 KEYWORDS = [
 "창업",
@@ -99,7 +83,6 @@ KEYWORDS = [
 "창업기업",
 "패키지",
 "TIPS",
-"액셀러레이팅",
 "중장년"
 ]
 
@@ -116,7 +99,6 @@ for item in items:
             break
 
 
-
 print("Filtered:", len(results))
 
 
@@ -125,17 +107,9 @@ unique = {i["title"]: i for i in results}
 
 results = list(unique.values())
 
-
 # 최대 10개
 results = results[:10]
 
-
-print("Final:", len(results))
-
-
-# -------------------
-# 메일 내용
-# -------------------
 
 if len(results) == 0:
 
@@ -155,9 +129,9 @@ else:
 
 
 
-# -------------------
+# ------------------------
 # 메일 발송
-# -------------------
+# ------------------------
 
 GMAIL_USER = os.environ["GMAIL_USER"]
 GMAIL_PASS = os.environ["GMAIL_PASS"]
